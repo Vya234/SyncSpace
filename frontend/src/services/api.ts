@@ -15,10 +15,11 @@ export const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('syncspace_token');
   if (token) {
+    // eslint-disable-next-line no-param-reassign
     config.headers = {
       ...config.headers,
       Authorization: `Bearer ${token}`,
-    };
+    } as typeof config.headers;
   }
   return config;
 });

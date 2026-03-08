@@ -4,8 +4,8 @@ import {
   useEffect,
   useMemo,
   useState,
-  ReactNode,
 } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '../services/authService';
 import { setOnUnauthorized } from '../services/api';

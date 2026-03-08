@@ -9,6 +9,7 @@ import {
 import { NotesEditor } from '../components/NotesEditor';
 import { ChatPanel } from '../components/ChatPanel';
 import { Button } from '../components/ui/Button';
+import { ToastContainer, type Toast } from '../components/Toast';
 import type { ActiveUser, ChatMessage, Workspace } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -37,6 +38,7 @@ export function WorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -44,10 +46,11 @@ export function WorkspacePage() {
 
     async function load() {
       try {
+        const id = workspaceId!;
         const [ws, noteContent, chat] = await Promise.all([
-          workspaceService.getWorkspace(workspaceId),
-          noteService.getNotes(workspaceId),
-          chatService.getMessages(workspaceId),
+          workspaceService.getWorkspace(id),
+          noteService.getNotes(id),
+          chatService.getMessages(id),
         ]);
         if (cancelled) return;
         setWorkspace(ws);
@@ -74,7 +77,8 @@ export function WorkspacePage() {
     const token = localStorage.getItem('syncspace_token') ?? '';
     const socket = connectSocket(token);
 
-    joinWorkspace(workspaceId);
+    const id = workspaceId!;
+    joinWorkspace(id);
 
     subscribeToNoteChange((content) => {
       setRemoteUpdating(true);
@@ -87,7 +91,28 @@ export function WorkspacePage() {
     });
 
     subscribeToUsers((users) => {
-      setActiveUsers(users);
+      setActiveUsers((prev) => {
+        const joined = users.filter(
+          (u) => !prev.some((p) => p.userId === u.userId),
+        );
+        const left = prev.filter(
+          (p) => !users.some((u) => u.userId === p.userId),
+        );
+
+        joined.forEach((u) => {
+          if (u.userId !== user.id) {
+            addToast(`🔵 ${u.name} joined the workspace`);
+          }
+        });
+
+        left.forEach((u) => {
+          if (u.userId !== user.id) {
+            addToast(`⚪ ${u.name} left the workspace`);
+          }
+        });
+
+        return users;
+      });
     });
 
     return () => {
@@ -159,6 +184,21 @@ export function WorkspacePage() {
     navigate('/dashboard');
   };
 
+  const addToast = (message: string) => {
+    const id = crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const toast: Toast = { id, message };
+    setToasts((prev) => [...prev, toast]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[calc(100vh-96px)] items-center justify-center">
@@ -177,7 +217,9 @@ export function WorkspacePage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:py-6">
+    <>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:py-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h2 className="text-lg font-semibold text-slate-50">{workspace.title}</h2>
@@ -233,7 +275,9 @@ export function WorkspacePage() {
           <ChatPanel messages={messages} onSend={handleSendMessage} />
         </div>
       </div>
-    </div>
+      </div>
+
+    </>
   );
 }
 
