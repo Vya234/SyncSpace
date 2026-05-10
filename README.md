@@ -2,6 +2,10 @@
 
 A real-time collaborative workspace platform where users can create shared workspaces, edit notes together, chat instantly, and see active collaborators.
 
+## Live Demo
+
+🌐 **Try SyncSpace here:** https://incandescent-fox-005f0f.netlify.app
+
 ### Screenshots
 
 #### Dashboard :
@@ -44,7 +48,8 @@ A real-time collaborative workspace platform where users can create shared works
   - Lightweight toast notifications when other users join or leave.
 
 - **Export to PDF**
-  - One-click export of workspace notes to PDF via a backend endpoint.
+  - One-click **Export Notes PDF** button in every workspace.
+  - Extracts the current shared notes and generates a downloadable PDF.
   - Includes workspace title and timestamp.
 
 ### Architecture
