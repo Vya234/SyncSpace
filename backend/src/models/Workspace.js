@@ -6,6 +6,8 @@ const workspaceSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      minlength: 1,
+      maxlength: 140,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -13,6 +15,12 @@ const workspaceSchema = new mongoose.Schema(
       required: true,
     },
     members: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    pastMembers: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

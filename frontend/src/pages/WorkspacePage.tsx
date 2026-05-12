@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { workspaceService } from '../services/workspaceService';
 import { noteService } from '../services/noteService';
@@ -16,14 +16,17 @@ import {
   connectSocket,
   disconnectSocket,
   joinWorkspace,
-  leaveWorkspace,
+  emitLeaveWorkspaceSocket,
   sendMessage,
   sendNoteChange,
+  getSocket,
   subscribeToMessages,
   subscribeToNoteChange,
   subscribeToUsers,
+  subscribeWorkspaceEvents,
 } from '../services/socket';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
+import { idFromRef } from '../utils/idFromRef';
 
 export function WorkspacePage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
@@ -39,9 +42,27 @@ export function WorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  /** When leaving voluntarily and the workspace is deleted (last member), skip duplicate `workspaceDeleted` toast. */
+  const suppressWorkspaceDeletedToastRef = useRef(false);
+
+  const addToast = useCallback((message: string, variant: Toast['variant'] = 'default') => {
+    const id = crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const toast: Toast = { id, message, variant };
+    setToasts((prev) => [...prev, toast]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   useEffect(() => {
     if (!workspaceId) return;
+    suppressWorkspaceDeletedToastRef.current = false;
     let cancelled = false;
 
     async function load() {
@@ -68,6 +89,7 @@ export function WorkspacePage() {
 
     return () => {
       cancelled = true;
+      suppressWorkspaceDeletedToastRef.current = false;
     };
   }, [workspaceId]);
 
@@ -79,6 +101,42 @@ export function WorkspacePage() {
 
     const id = workspaceId!;
     joinWorkspace(id);
+
+    const unsubWorkspace = subscribeWorkspaceEvents({
+      onRemovedFromWorkspace: (wid) => {
+        if (wid !== id) return;
+        emitLeaveWorkspaceSocket();
+        addToast('You were removed from this workspace', 'error');
+        navigate('/dashboard');
+      },
+      onWorkspaceDeleted: (wid) => {
+        if (wid !== id) return;
+        emitLeaveWorkspaceSocket();
+        if (!suppressWorkspaceDeletedToastRef.current) {
+          addToast('This workspace was deleted', 'error');
+        } else {
+          suppressWorkspaceDeletedToastRef.current = false;
+        }
+        navigate('/dashboard');
+      },
+      onOwnershipTransferred: (payload) => {
+        if (payload.workspaceId !== id) return;
+        if (payload.newOwnerId === user?.id) {
+          addToast('You are now the workspace owner', 'success');
+        } else {
+          addToast('Workspace ownership was transferred', 'default');
+        }
+      },
+      onWorkspaceUpdated: (wid) => {
+        if (wid !== id) return;
+        workspaceService
+          .getWorkspace(id)
+          .then(setWorkspace)
+          .catch(() => {
+            addToast('Could not refresh workspace details', 'error');
+          });
+      },
+    });
 
     subscribeToNoteChange((content) => {
       setRemoteUpdating(true);
@@ -116,14 +174,15 @@ export function WorkspacePage() {
     });
 
     return () => {
-      leaveWorkspace();
+      unsubWorkspace();
+      emitLeaveWorkspaceSocket();
       socket.off('noteChange');
       socket.off('message');
       socket.off('userConnected');
       socket.off('userDisconnected');
       disconnectSocket();
     };
-  }, [workspaceId, user]);
+  }, [workspaceId, user, addToast, navigate]);
 
   const persistNotes = useDebouncedCallback(async (content: string) => {
     if (!workspaceId) return;
@@ -148,6 +207,11 @@ export function WorkspacePage() {
 
   const handleSendMessage = (content: string) => {
     if (!workspaceId || !user) return;
+    const sock = getSocket();
+    if (!sock?.connected) {
+      addToast('Not connected. Check your network and try again.', 'error');
+      return;
+    }
     sendMessage(workspaceId, user.id, content, user.name);
   };
 
@@ -174,29 +238,65 @@ export function WorkspacePage() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      addToast('Notes exported as PDF', 'success');
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Export failed', err);
+      addToast('Failed to export notes', 'error');
     }
   };
 
-  const handleLeave = () => {
-    navigate('/dashboard');
+  const handleLeave = async () => {
+    if (!workspaceId) return;
+    if (
+      !window.confirm(
+        'Leave this workspace? You will be removed from active members; the space stays available and you can rejoin from the dashboard.',
+      )
+    ) {
+      return;
+    }
+    try {
+      await workspaceService.leaveWorkspace(workspaceId);
+      emitLeaveWorkspaceSocket();
+      addToast('You left the workspace', 'success');
+      navigate('/dashboard');
+    } catch (err: any) {
+      addToast(err?.response?.data?.message ?? 'Failed to leave workspace', 'error');
+    }
   };
 
-  const addToast = (message: string) => {
-    const id = crypto.randomUUID
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const toast: Toast = { id, message };
-    setToasts((prev) => [...prev, toast]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+  const handleDeleteWorkspace = async () => {
+    if (!workspaceId) return;
+    if (
+      !window.confirm(
+        'Permanently delete this workspace? All members will be removed and all chat messages will be deleted.',
+      )
+    ) {
+      return;
+    }
+    suppressWorkspaceDeletedToastRef.current = true;
+    try {
+      await workspaceService.deleteWorkspace(workspaceId);
+      addToast('Workspace deleted', 'success');
+      emitLeaveWorkspaceSocket();
+      navigate('/dashboard');
+    } catch (err: any) {
+      suppressWorkspaceDeletedToastRef.current = false;
+      addToast(err?.response?.data?.message ?? 'Failed to delete workspace', 'error');
+    }
   };
 
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const handleRemoveMember = async (memberId: string, name: string) => {
+    if (!workspaceId) return;
+    if (!window.confirm(`Remove ${name} from this workspace?`)) return;
+    try {
+      await workspaceService.removeMember(workspaceId, memberId);
+      addToast('Member removed', 'success');
+      const ws = await workspaceService.getWorkspace(workspaceId);
+      setWorkspace(ws);
+    } catch (err: any) {
+      addToast(err?.response?.data?.message ?? 'Failed to remove member', 'error');
+    }
   };
 
   if (loading) {
@@ -243,6 +343,15 @@ export function WorkspacePage() {
           >
             Leave workspace
           </Button>
+          {idFromRef(workspace.createdBy) === user!.id && (
+            <Button
+              type="button"
+              onClick={handleDeleteWorkspace}
+              className="border border-red-500/50 bg-red-600/90 px-4 py-1.5 text-xs text-slate-50 hover:bg-red-500"
+            >
+              Delete workspace
+            </Button>
+          )}
           {saving && (
             <span className="text-xs text-slate-500">Saving changes...</span>
           )}
@@ -254,7 +363,14 @@ export function WorkspacePage() {
 
       <div className="grid flex-1 gap-4 md:grid-cols-[220px_minmax(0,1.2fr)_minmax(0,0.9fr)]">
         <div className="space-y-3">
-          <ActiveUsers users={activeUsers} />
+          <ActiveUsers
+            users={activeUsers}
+            currentUserId={user!.id}
+            createdById={idFromRef(workspace.createdBy)}
+            onRemoveMember={
+              idFromRef(workspace.createdBy) === user!.id ? handleRemoveMember : undefined
+            }
+          />
         </div>
         <div className="flex min-h-[320px] flex-col">
           <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
@@ -271,7 +387,7 @@ export function WorkspacePage() {
             />
           </div>
         </div>
-        <div className="min-h-[320px]">
+        <div className="min-h-[280px]">
           <ChatPanel messages={messages} onSend={handleSendMessage} />
         </div>
       </div>

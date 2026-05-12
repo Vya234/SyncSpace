@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 export type Toast = {
   id: string;
   message: ReactNode;
+  variant?: 'default' | 'success' | 'error';
 };
 
 type ToastContainerProps = {
@@ -17,7 +18,13 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="pointer-events-auto transform rounded-xl border border-slate-700 bg-slate-900/95 px-3 py-2 text-xs text-slate-50 shadow-lg shadow-black/40 transition-opacity duration-200"
+            className={`pointer-events-auto transform rounded-xl px-3 py-2 text-xs text-slate-50 shadow-lg shadow-black/40 transition-opacity duration-200 ${
+              toast.variant === 'success'
+                ? 'border border-emerald-600/60 bg-emerald-950/90'
+                : toast.variant === 'error'
+                  ? 'border border-red-500/50 bg-red-950/90'
+                  : 'border border-slate-700 bg-slate-900/95'
+            }`}
           >
             <div className="flex items-start justify-between gap-3">
               <div>{toast.message}</div>

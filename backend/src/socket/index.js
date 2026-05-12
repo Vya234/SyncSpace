@@ -167,5 +167,78 @@ function registerSocketHandlers(io) {
   });
 }
 
+/**
+ * Kick a member from the Socket.io room and update presence maps.
+ * Emits removedFromWorkspace to the kicked sockets and userDisconnected to the room.
+ */
+async function kickMemberFromWorkspace(io, workspaceId, memberId) {
+  const memberIdStr = String(memberId);
+  const sockets = await io.in(workspaceId).fetchSockets();
+  const matching = sockets.filter((s) => String(s.data.userId) === memberIdStr);
+
+  matching.forEach((sock) => {
+    sock.leave(workspaceId);
+    sock.data.workspaceId = undefined;
+    sock.emit('removedFromWorkspace', { workspaceId });
+  });
+
+  const userMap = activeUsersByWorkspace.get(workspaceId);
+  if (userMap) {
+    userMap.delete(memberIdStr);
+    if (userMap.size === 0) {
+      activeUsersByWorkspace.delete(workspaceId);
+    }
+  }
+
+  io.to(workspaceId).emit('userDisconnected', {
+    workspaceId,
+    users: getActiveUsersList(workspaceId),
+  });
+}
+
+/**
+ * Notify all clients in a workspace room that it was deleted, then clear presence.
+ */
+async function notifyWorkspaceDeleted(io, workspaceId) {
+  const sockets = await io.in(workspaceId).fetchSockets();
+  sockets.forEach((sock) => {
+    sock.leave(workspaceId);
+    sock.data.workspaceId = undefined;
+    sock.emit('workspaceDeleted', { workspaceId });
+  });
+  activeUsersByWorkspace.delete(workspaceId);
+}
+
+/**
+ * Remove a user's sockets from a room and update presence (voluntary leave).
+ * Does not emit removedFromWorkspace.
+ */
+async function removeLeavingUserFromRoom(io, workspaceId, userId) {
+  const userIdStr = String(userId);
+  const sockets = await io.in(workspaceId).fetchSockets();
+  sockets
+    .filter((s) => String(s.data.userId) === userIdStr)
+    .forEach((sock) => {
+      sock.leave(workspaceId);
+      sock.data.workspaceId = undefined;
+    });
+
+  const userMap = activeUsersByWorkspace.get(workspaceId);
+  if (userMap) {
+    userMap.delete(userIdStr);
+    if (userMap.size === 0) {
+      activeUsersByWorkspace.delete(workspaceId);
+    }
+  }
+
+  io.to(workspaceId).emit('userDisconnected', {
+    workspaceId,
+    users: getActiveUsersList(workspaceId),
+  });
+}
+
 module.exports = registerSocketHandlers;
+module.exports.kickMemberFromWorkspace = kickMemberFromWorkspace;
+module.exports.notifyWorkspaceDeleted = notifyWorkspaceDeleted;
+module.exports.removeLeavingUserFromRoom = removeLeavingUserFromRoom;
 

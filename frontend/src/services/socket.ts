@@ -37,7 +37,8 @@ export function joinWorkspace(workspaceId: string) {
   socket.emit('joinWorkspace', { workspaceId });
 }
 
-export function leaveWorkspace() {
+/** Emit socket `leaveWorkspace` (presence + room leave). Use after HTTP leave/delete or on page unload. */
+export function emitLeaveWorkspaceSocket() {
   if (!socket) return;
   socket.emit('leaveWorkspace');
 }
@@ -81,5 +82,49 @@ export function subscribeToUsers(handler: UsersHandler) {
   socket.off('userDisconnected');
   socket.on('userConnected', update);
   socket.on('userDisconnected', update);
+}
+
+export type OwnershipTransferredPayload = {
+  workspaceId: string;
+  newOwnerId: string;
+};
+
+export type WorkspaceEventHandlers = {
+  onRemovedFromWorkspace: (workspaceId: string) => void;
+  onWorkspaceDeleted: (workspaceId: string) => void;
+  onOwnershipTransferred?: (payload: OwnershipTransferredPayload) => void;
+  onWorkspaceUpdated?: (workspaceId: string) => void;
+};
+
+/** Register workspace lifecycle listeners; call returned function to remove them. */
+export function subscribeWorkspaceEvents(handlers: WorkspaceEventHandlers): () => void {
+  if (!socket) {
+    return () => {};
+  }
+
+  const onRemoved = (payload: { workspaceId: string }) => {
+    handlers.onRemovedFromWorkspace(payload.workspaceId);
+  };
+  const onDeleted = (payload: { workspaceId: string }) => {
+    handlers.onWorkspaceDeleted(payload.workspaceId);
+  };
+  const onOwner = (payload: OwnershipTransferredPayload) => {
+    handlers.onOwnershipTransferred?.(payload);
+  };
+  const onUpdated = (payload: { workspaceId: string }) => {
+    handlers.onWorkspaceUpdated?.(payload.workspaceId);
+  };
+
+  socket.on('removedFromWorkspace', onRemoved);
+  socket.on('workspaceDeleted', onDeleted);
+  socket.on('ownershipTransferred', onOwner);
+  socket.on('workspaceUpdated', onUpdated);
+
+  return () => {
+    socket?.off('removedFromWorkspace', onRemoved);
+    socket?.off('workspaceDeleted', onDeleted);
+    socket?.off('ownershipTransferred', onOwner);
+    socket?.off('workspaceUpdated', onUpdated);
+  };
 }
 

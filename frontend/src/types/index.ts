@@ -4,13 +4,22 @@ export type User = {
   email: string;
 };
 
+export type UserRef = string | { _id: string; name?: string; email?: string };
+
 export type Workspace = {
   _id: string;
   title: string;
-  createdBy: string;
-  members: string[];
+  createdBy: UserRef;
+  members: UserRef[];
+  pastMembers?: UserRef[];
   noteContent?: string;
   createdAt?: string;
+  updatedAt?: string;
+};
+
+export type MyWorkspacesResponse = {
+  activeWorkspaces: Workspace[];
+  recentWorkspaces: Workspace[];
 };
 
 export type ChatMessage = {
@@ -25,5 +34,4 @@ export type ActiveUser = {
   userId: string;
   name: string;
 };
-
 
