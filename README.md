@@ -208,3 +208,9 @@ Open the frontend URL (default `http://localhost:5173`) in your browser, registe
 - **Typing indicators** and **read receipts** in chat.
 - Deployment with Docker and CI/CD pipeline.
 
+---
+
+## 👤 Author
+
+Kavya Rai  
+IIT Kharagpur
