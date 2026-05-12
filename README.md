@@ -4,8 +4,6 @@ A real-time collaborative workspace platform where users can create shared works
 
 ## Live Demo
 
-**Deployed frontend:** [https://incandescent-fox-005f0f.netlify.app](https://incandescent-fox-005f0f.netlify.app)
-
 🌐 **Try SyncSpace here:** https://incandescent-fox-005f0f.netlify.app
 
 ### Screenshots
